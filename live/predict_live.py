@@ -1,63 +1,46 @@
+import yfinance as yf
 import pandas as pd
 import ta
 import joblib
 
-MODEL_PATH = "model/intraday_xgb.pkl"
-DATA_PATH = "data/reliance_5min.csv"
-
-# ===============================
 # Load trained model
-# ===============================
-model = joblib.load(MODEL_PATH)
+model = joblib.load("model/intraday_xgb.pkl")
 
-# ===============================
-# Load latest intraday data
-# ===============================
-df = pd.read_csv(DATA_PATH)
+# Fetch intraday data
+data = yf.download(
+    "RELIANCE.NS",
+    interval="5m",
+    period="5d",
+    progress=False
+)
 
-# Fix timestamp column
-if "Datetime" not in df.columns:
-    df.rename(columns={df.columns[0]: "Datetime"}, inplace=True)
+# Fix MultiIndex columns if present
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.get_level_values(0)
 
-# Keep only required columns
-df = df[["Datetime", "Open", "High", "Low", "Close", "Volume"]]
+data = data.reset_index()
 
-# 🔴 FORCE numeric conversion (CRITICAL FIX)
-for col in ["Open", "High", "Low", "Close", "Volume"]:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
+df = data[["Datetime", "Open", "High", "Low", "Close", "Volume"]].copy()
 
-# Drop invalid rows
-df.dropna(inplace=True)
+# Ensure numeric columns
+numeric_cols = ["Open", "High", "Low", "Close", "Volume"]
+df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
-# Take enough rows for indicators
-df = df.tail(50).copy()
-
-# ===============================
-# Feature engineering (MATCH TRAINING)
-# ===============================
+# Feature engineering
 df["ema_9"] = ta.trend.EMAIndicator(df["Close"], window=9).ema_indicator()
 df["ema_21"] = ta.trend.EMAIndicator(df["Close"], window=21).ema_indicator()
 df["rsi"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi()
-df["vwap"] = ta.volume.VolumeWeightedAveragePrice(
-    df["High"], df["Low"], df["Close"], df["Volume"]
-).volume_weighted_average_price()
+df["vwap"] = (df["Volume"] * df["Close"]).cumsum() / df["Volume"].cumsum()
 
 df.dropna(inplace=True)
 
-# ===============================
-# Prepare latest candle
-# ===============================
+# Latest candle
 latest = df.iloc[-1][["ema_9", "ema_21", "rsi", "vwap"]].values.reshape(1, -1)
 
-# ===============================
-# Predict signal
-# ===============================
-pred = model.predict(latest)[0]
+prediction = model.predict(latest)[0]
+confidence = model.predict_proba(latest).max()
 
-signal_map = {
-    0: "SELL",
-    1: "HOLD",
-    2: "BUY"
-}
+label_map = {0: "SELL", 1: "HOLD", 2: "BUY"}
 
-print("📊 Live AI Signal:", signal_map[pred])
+print("📊 LIVE SIGNAL:", label_map[prediction])
+print("📈 Confidence:", round(confidence, 2))
