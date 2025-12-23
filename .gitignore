@@ -16,3 +16,4 @@ config/*.yaml
 
 # notebooks
 .ipynb_checkpoints/
+data/*.csv
