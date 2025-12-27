@@ -17,3 +17,7 @@ config/*.yaml
 # notebooks
 .ipynb_checkpoints/
 data/*.csv
+#
+.env
+_pycache_/
+*.log
